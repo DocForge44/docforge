@@ -1,6 +1,4 @@
 // api/generate.js — Vercel Serverless Function
-// This keeps your Anthropic API key safe on the server.
-// Set ANTHROPIC_API_KEY in your Vercel environment variables.
 
 export const config = {
   runtime: 'edge',
@@ -18,7 +16,6 @@ Guidelines:
 - Return ONLY the document text, no preamble or explanation`;
 
 export default async function handler(req) {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 200,
@@ -38,6 +35,12 @@ export default async function handler(req) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // DEBUG: log key status (never logs the actual key)
+  console.log('API key present:', !!apiKey);
+  console.log('API key length:', apiKey ? apiKey.length : 0);
+  console.log('API key prefix:', apiKey ? apiKey.substring(0, 10) : 'MISSING');
+
   if (!apiKey) {
     return new Response(JSON.stringify({ error: 'API key not configured' }), {
       status: 500,
@@ -63,6 +66,9 @@ export default async function handler(req) {
     });
   }
 
+  console.log('Prompt received, length:', prompt.length);
+  console.log('Calling Anthropic API...');
+
   let anthropicResponse;
   try {
     anthropicResponse = await fetch('https://api.anthropic.com/v1/messages', {
@@ -81,21 +87,24 @@ export default async function handler(req) {
       }),
     });
   } catch (err) {
+    console.log('Fetch error:', String(err));
     return new Response(JSON.stringify({ error: 'Failed to reach Anthropic API', detail: String(err) }), {
       status: 502,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
+  console.log('Anthropic response status:', anthropicResponse.status);
+
   if (!anthropicResponse.ok) {
     const errText = await anthropicResponse.text();
-    return new Response(JSON.stringify({ error: 'Anthropic API error', detail: errText }), {
+    console.log('Anthropic error body:', errText);
+    return new Response(JSON.stringify({ error: 'Anthropic API error', status: anthropicResponse.status, detail: errText }), {
       status: 502,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
-  // Stream the response directly back to the browser
   return new Response(anthropicResponse.body, {
     status: 200,
     headers: {
