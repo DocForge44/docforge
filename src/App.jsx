@@ -172,15 +172,40 @@ export default function DocForge() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let fullText = "";
+      let buffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value);
-        const lines = chunk.split("\n").filter(l => l.startsWith("data: "));
+
+        // Accumulate into buffer — chunks can arrive mid-line
+        buffer += decoder.decode(value, { stream: true });
+
+        // Only process complete lines
+        const lines = buffer.split("\n");
+
+        // Keep last incomplete line in buffer
+        buffer = lines.pop() || "";
+
         for (const line of lines) {
-          const data = line.slice(6);
-          if (data === "[DONE]") continue;
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          const data = trimmed.slice(6).trim();
+          if (!data || data === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === "content_block_delta" && parsed.delta?.text) {
+              fullText += parsed.delta.text;
+              setGeneratedDoc(fullText);
+            }
+          } catch {}
+        }
+      }
+
+      // Process any remaining buffer content
+      if (buffer.trim().startsWith("data: ")) {
+        const data = buffer.trim().slice(6).trim();
+        if (data && data !== "[DONE]") {
           try {
             const parsed = JSON.parse(data);
             if (parsed.type === "content_block_delta" && parsed.delta?.text) {
