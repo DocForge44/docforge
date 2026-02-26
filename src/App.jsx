@@ -170,6 +170,7 @@ export default function DocForge() {
 
     try {
       const prompt = buildPrompt(selectedDoc.id, formFields);
+      console.log("PROMPT:", prompt); // add this line
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
