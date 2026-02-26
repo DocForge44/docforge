@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const DOCUMENT_TYPES = [
   {
@@ -103,6 +103,17 @@ const DOCUMENT_TYPES = [
   },
 ];
 
+const systemPrompt = `You are DocForge, an expert legal document drafting assistant. You generate professional, comprehensive, legally-sound business documents. 
+
+Guidelines:
+- Write in clear, professional legal language
+- Include all standard clauses appropriate for the document type
+- Use [BRACKETED PLACEHOLDERS] only for items the user must customize (like dates, state/jurisdiction choice, specific monetary amounts not provided)
+- Make documents comprehensive and ready to use
+- Add a brief disclaimer at the end noting this is AI-generated and should be reviewed by a licensed attorney for high-stakes use
+- Format with clear section headers using markdown (## for main sections)
+- Return ONLY the document text, no preamble or explanation`;
+
 function buildPrompt(docType, fields) {
   const docInfo = DOCUMENT_TYPES.find(d => d.id === docType);
   let prompt = `Generate a professional ${docInfo.name} with the following details:\n\n`;
@@ -134,10 +145,11 @@ function MarkdownRenderer({ content }) {
 }
 
 export default function DocForge() {
-  const [step, setStep] = useState("home");
+  const [step, setStep] = useState("home"); // home | form | generating | result
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [formFields, setFormFields] = useState({});
   const [generatedDoc, setGeneratedDoc] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
   const docRef = useRef(null);
@@ -154,21 +166,23 @@ export default function DocForge() {
     setStep("generating");
     setGeneratedDoc("");
     setError(null);
+    setIsStreaming(true);
 
     try {
       const prompt = buildPrompt(selectedDoc.id, formFields);
-      
-      // Calls our secure serverless function — API key never exposed to browser
-      const response = await fetch("/api/generate", {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4000,
+          system: systemPrompt,
+          messages: [{ role: "user", content: prompt }],
+          stream: true,
+        }),
       });
 
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error || "Generation failed");
-      }
+      if (!response.ok) throw new Error("API request failed");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -193,8 +207,10 @@ export default function DocForge() {
       }
       setStep("result");
     } catch (err) {
-      setError(err.message || "Failed to generate document. Please try again.");
+      setError("Failed to generate document. Please try again.");
       setStep("form");
+    } finally {
+      setIsStreaming(false);
     }
   };
 
@@ -227,84 +243,249 @@ export default function DocForge() {
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap');
+
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
         :root {
-          --bg: #0c0c0e; --surface: #13131a; --surface2: #1c1c28;
-          --border: #2a2a3a; --accent: #e8c97a; --accent2: #c8a84a;
-          --text: #f0ede8; --muted: #8885a0; --danger: #e06c75;
+          --bg: #0c0c0e;
+          --surface: #13131a;
+          --surface2: #1c1c28;
+          --border: #2a2a3a;
+          --accent: #e8c97a;
+          --accent2: #c8a84a;
+          --text: #f0ede8;
+          --muted: #8885a0;
+          --danger: #e06c75;
         }
+
         body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; }
-        .app { min-height: 100vh; background: var(--bg); background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(232,201,122,0.08), transparent); }
-        .nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 48px; border-bottom: 1px solid var(--border); background: rgba(12,12,14,0.9); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 100; }
-        .logo { font-family: 'Playfair Display', serif; font-size: 22px; font-weight: 900; background: linear-gradient(135deg, var(--accent), #fff8e1); -webkit-background-clip: text; -webkit-text-fill-color: transparent; cursor: pointer; }
+
+        .app {
+          min-height: 100vh;
+          background: var(--bg);
+          background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(232,201,122,0.08), transparent);
+        }
+
+        /* NAV */
+        .nav {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 20px 48px; border-bottom: 1px solid var(--border);
+          background: rgba(12,12,14,0.9); backdrop-filter: blur(10px);
+          position: sticky; top: 0; z-index: 100;
+        }
+        .logo {
+          font-family: 'Playfair Display', serif;
+          font-size: 22px; font-weight: 900;
+          background: linear-gradient(135deg, var(--accent), #fff8e1);
+          -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+          cursor: pointer; letter-spacing: -0.5px;
+        }
         .nav-tagline { font-size: 13px; color: var(--muted); }
-        .nav-badge { background: var(--accent); color: #0c0c0e; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; letter-spacing: 0.5px; text-transform: uppercase; }
-        .hero { text-align: center; padding: 80px 24px 60px; max-width: 700px; margin: 0 auto; }
-        .hero-eyebrow { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); margin-bottom: 20px; border: 1px solid rgba(232,201,122,0.3); padding: 6px 14px; border-radius: 20px; }
-        .hero h1 { font-family: 'Playfair Display', serif; font-size: clamp(42px, 7vw, 72px); font-weight: 900; line-height: 1.05; margin-bottom: 20px; letter-spacing: -2px; }
+        .nav-badge {
+          background: var(--accent); color: #0c0c0e;
+          font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px;
+          letter-spacing: 0.5px; text-transform: uppercase;
+        }
+
+        /* HOME */
+        .hero {
+          text-align: center; padding: 80px 24px 60px;
+          max-width: 700px; margin: 0 auto;
+        }
+        .hero-eyebrow {
+          display: inline-block; font-size: 11px; font-weight: 600;
+          letter-spacing: 2px; text-transform: uppercase;
+          color: var(--accent); margin-bottom: 20px;
+          border: 1px solid rgba(232,201,122,0.3); padding: 6px 14px; border-radius: 20px;
+        }
+        .hero h1 {
+          font-family: 'Playfair Display', serif;
+          font-size: clamp(42px, 7vw, 72px); font-weight: 900; line-height: 1.05;
+          margin-bottom: 20px; letter-spacing: -2px;
+        }
         .hero h1 em { font-style: italic; color: var(--accent); }
         .hero p { font-size: 17px; color: var(--muted); line-height: 1.7; max-width: 500px; margin: 0 auto 16px; }
         .price-note { font-size: 14px; color: var(--accent); font-weight: 500; margin-top: 8px; }
-        .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 0 48px 80px; max-width: 1200px; margin: 0 auto; }
-        .doc-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden; }
-        .doc-card::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(232,201,122,0.06), transparent); opacity: 0; transition: opacity 0.2s; }
+        .pricing-row {
+          display: flex; gap: 12px; justify-content: center;
+          margin-top: 32px; flex-wrap: wrap;
+        }
+        .pricing-btn {
+          display: inline-flex; flex-direction: column; align-items: center;
+          padding: 14px 28px; border-radius: 10px; text-decoration: none;
+          font-family: 'DM Sans', sans-serif; transition: all 0.2s; cursor: pointer;
+          border: none;
+        }
+        .pricing-btn-primary {
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          color: #0c0c0e;
+        }
+        .pricing-btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(232,201,122,0.35); }
+        .pricing-btn-secondary {
+          background: var(--surface); border: 1px solid var(--border); color: var(--text);
+        }
+        .pricing-btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+        .pricing-btn-label { font-size: 15px; font-weight: 700; }
+        .pricing-btn-sub { font-size: 11px; opacity: 0.75; margin-top: 2px; font-weight: 400; }
+        .pricing-divider { display: flex; align-items: center; color: var(--muted); font-size: 12px; padding: 0 4px; }
+
+        /* GRID */
+        .doc-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+          gap: 16px; padding: 0 48px 80px; max-width: 1200px; margin: 0 auto;
+        }
+        .doc-card {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: 12px; padding: 24px; cursor: pointer;
+          transition: all 0.2s ease; position: relative; overflow: hidden;
+        }
+        .doc-card::before {
+          content: ''; position: absolute; inset: 0;
+          background: linear-gradient(135deg, rgba(232,201,122,0.06), transparent);
+          opacity: 0; transition: opacity 0.2s;
+        }
         .doc-card:hover { border-color: var(--accent); transform: translateY(-2px); }
         .doc-card:hover::before { opacity: 1; }
         .doc-icon { font-size: 28px; margin-bottom: 12px; }
         .doc-name { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 700; margin-bottom: 6px; }
         .doc-desc { font-size: 13px; color: var(--muted); line-height: 1.5; }
-        .doc-arrow { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 18px; color: var(--accent); opacity: 0; transition: opacity 0.2s; }
+        .doc-arrow {
+          position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+          font-size: 18px; color: var(--accent); opacity: 0; transition: opacity 0.2s;
+        }
         .doc-card:hover .doc-arrow { opacity: 1; }
-        .form-container { max-width: 640px; margin: 0 auto; padding: 48px 24px 80px; }
-        .back-btn { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; border: none; background: none; padding: 0; margin-bottom: 32px; transition: color 0.2s; }
+
+        /* FORM */
+        .form-container {
+          max-width: 640px; margin: 0 auto; padding: 48px 24px 80px;
+        }
+        .back-btn {
+          display: flex; align-items: center; gap: 8px;
+          font-size: 13px; color: var(--muted); cursor: pointer;
+          border: none; background: none; padding: 0; margin-bottom: 32px;
+          transition: color 0.2s;
+        }
         .back-btn:hover { color: var(--text); }
         .form-header { margin-bottom: 36px; }
         .form-header .doc-icon { font-size: 36px; margin-bottom: 12px; display: block; }
-        .form-header h2 { font-family: 'Playfair Display', serif; font-size: 32px; font-weight: 900; margin-bottom: 8px; }
+        .form-header h2 {
+          font-family: 'Playfair Display', serif; font-size: 32px; font-weight: 900;
+          margin-bottom: 8px; letter-spacing: -1px;
+        }
         .form-header p { font-size: 14px; color: var(--muted); }
+
         .field-group { margin-bottom: 22px; }
-        label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-        input, textarea { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px; padding: 12px 16px; border-radius: 8px; outline: none; transition: border-color 0.2s; resize: vertical; }
+        label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text); letter-spacing: 0.3px; }
+        input, textarea {
+          width: 100%; background: var(--surface); border: 1px solid var(--border);
+          color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px;
+          padding: 12px 16px; border-radius: 8px; outline: none; transition: border-color 0.2s;
+          resize: vertical;
+        }
         input:focus, textarea:focus { border-color: var(--accent); }
         input::placeholder, textarea::placeholder { color: var(--muted); }
         textarea { min-height: 90px; }
-        .generate-btn { width: 100%; padding: 16px; border-radius: 10px; border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600; background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0c0c0e; margin-top: 8px; transition: all 0.2s; }
+
+        .generate-btn {
+          width: 100%; padding: 16px; border-radius: 10px; border: none; cursor: pointer;
+          font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          color: #0c0c0e; margin-top: 8px; letter-spacing: 0.3px;
+          transition: all 0.2s; position: relative; overflow: hidden;
+        }
         .generate-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(232,201,122,0.3); }
         .generate-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-        .generating-screen { max-width: 640px; margin: 0 auto; padding: 48px 24px; }
-        .generating-screen h2 { font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 700; margin-bottom: 12px; }
+
+        /* GENERATING */
+        .generating-screen {
+          max-width: 640px; margin: 0 auto; padding: 48px 24px;
+        }
+        .generating-screen h2 {
+          font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 700;
+          margin-bottom: 12px;
+        }
         .generating-screen p { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
-        .stream-preview { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; min-height: 300px; font-size: 13px; line-height: 1.8; color: var(--muted); white-space: pre-wrap; overflow-y: auto; max-height: 500px; }
-        .stream-preview::after { content: '▋'; animation: blink 1s infinite; color: var(--accent); }
+        .stream-preview {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: 12px; padding: 24px; min-height: 300px;
+          font-size: 13px; line-height: 1.8; color: var(--muted);
+          white-space: pre-wrap; overflow-y: auto; max-height: 500px;
+          position: relative;
+        }
+        .stream-preview::after {
+          content: '▋'; animation: blink 1s infinite;
+          color: var(--accent); font-size: 14px;
+        }
         @keyframes blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
-        .progress-bar { height: 2px; background: var(--border); border-radius: 2px; margin-bottom: 24px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); animation: progress 3s ease-in-out infinite alternate; }
+        .progress-bar {
+          height: 2px; background: var(--border); border-radius: 2px;
+          margin-bottom: 24px; overflow: hidden;
+        }
+        .progress-fill {
+          height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+          animation: progress 3s ease-in-out infinite alternate;
+        }
         @keyframes progress { from { width: 20%; } to { width: 85%; } }
+
+        /* RESULT */
         .result-container { max-width: 800px; margin: 0 auto; padding: 48px 24px 80px; }
         .result-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 32px; gap: 16px; flex-wrap: wrap; }
         .result-title h2 { font-family: 'Playfair Display', serif; font-size: 28px; font-weight: 700; margin-bottom: 4px; }
         .result-title p { font-size: 13px; color: var(--muted); }
         .result-actions { display: flex; gap: 10px; }
-        .action-btn { display: flex; align-items: center; gap: 6px; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .action-btn {
+          display: flex; align-items: center; gap: 6px;
+          padding: 10px 18px; border-radius: 8px; border: 1px solid var(--border);
+          background: var(--surface); color: var(--text);
+          font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
+          cursor: pointer; transition: all 0.2s; white-space: nowrap;
+        }
         .action-btn:hover { border-color: var(--accent); color: var(--accent); }
-        .action-btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0c0c0e; border-color: transparent; }
-        .action-btn.primary:hover { opacity: 0.9; }
-        .doc-output { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 40px; }
+        .action-btn.primary {
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          color: #0c0c0e; border-color: transparent;
+        }
+        .action-btn.primary:hover { color: #0c0c0e; opacity: 0.9; }
+
+        .doc-output {
+          background: var(--surface); border: 1px solid var(--border);
+          border-radius: 12px; padding: 40px;
+        }
         .doc-content h1 { font-family: 'Playfair Display', serif; font-size: 26px; font-weight: 700; margin: 0 0 24px; }
         .doc-content h2 { font-family: 'Playfair Display', serif; font-size: 18px; font-weight: 700; margin: 28px 0 12px; color: var(--accent); }
         .doc-content h3 { font-size: 15px; font-weight: 600; margin: 20px 0 8px; }
         .doc-content p { font-size: 14px; line-height: 1.8; color: #ccc8e0; margin-bottom: 12px; }
+        .doc-content br { display: block; margin: 4px 0; content: ''; }
         .placeholder { background: rgba(232,201,122,0.15); color: var(--accent); padding: 1px 4px; border-radius: 3px; font-weight: 500; }
-        .new-doc-btn { display: block; margin: 32px auto 0; padding: 14px 32px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-family: 'DM Sans', sans-serif; font-size: 14px; cursor: pointer; transition: all 0.2s; }
+
+        .new-doc-btn {
+          display: block; margin: 32px auto 0;
+          padding: 14px 32px; border-radius: 8px; border: 1px solid var(--border);
+          background: transparent; color: var(--muted);
+          font-family: 'DM Sans', sans-serif; font-size: 14px; cursor: pointer;
+          transition: all 0.2s;
+        }
         .new-doc-btn:hover { color: var(--text); border-color: var(--text); }
-        .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; padding: 12px; background: rgba(224,108,117,0.1); border-radius: 6px; border: 1px solid rgba(224,108,117,0.2); }
-        .footer { text-align: center; padding: 24px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
-        @media (max-width: 600px) { .nav { padding: 16px 20px; } .doc-grid { padding: 0 20px 60px; } .hero { padding: 48px 20px 40px; } }
+
+        .error-msg { color: var(--danger); font-size: 13px; margin-top: 8px; }
+
+        /* FOOTER */
+        .footer {
+          text-align: center; padding: 24px; border-top: 1px solid var(--border);
+          font-size: 12px; color: var(--muted);
+        }
+
+        @media (max-width: 600px) {
+          .nav { padding: 16px 20px; }
+          .doc-grid { padding: 0 20px 60px; }
+          .hero { padding: 48px 20px 40px; }
+        }
       `}</style>
       <div className="app">
         <nav className="nav">
           <div className="logo" onClick={resetToHome}>DocForge</div>
-          <span className="nav-tagline">AI Business Documents</span>
+          <span className="nav-tagline">AI-Powered Business Documents</span>
           <span className="nav-badge">Free Beta</span>
         </nav>
 
@@ -315,6 +496,30 @@ export default function DocForge() {
               <h1>Legal docs in <em>seconds,</em> not hours</h1>
               <p>Professional contracts, policies & agreements tailored to your business — no lawyers, no templates, no waiting.</p>
               <p className="price-note">⚡ 8 document types · Powered by Claude AI · Instant download</p>
+              <div className="pricing-row">
+                <a
+                  href="https://buy.stripe.com/5kQ4gs8Yn6jb3Fde148ww00"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="pricing-btn pricing-btn-primary"
+                >
+                  <span className="pricing-btn-label">Get Pro Access — $19/mo</span>
+                  <span className="pricing-btn-sub">Unlimited documents · Cancel anytime</span>
+                </a>
+                <span className="pricing-divider">or</span>
+                <a
+                  href="https://buy.stripe.com/28E28kdeD6jbdfNcX08ww01"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="pricing-btn pricing-btn-secondary"
+                >
+                  <span className="pricing-btn-label">Single Document — $9</span>
+                  <span className="pricing-btn-sub">One-time · No subscription</span>
+                </a>
+              </div>
+              <p style={{fontSize: '12px', color: 'var(--muted)', marginTop: '16px'}}>
+                Or scroll down and try a document free ↓
+              </p>
             </div>
             <div className="doc-grid">
               {DOCUMENT_TYPES.map(doc => (
@@ -341,14 +546,27 @@ export default function DocForge() {
               <div className="field-group" key={field.key}>
                 <label>{field.label}</label>
                 {field.multiline ? (
-                  <textarea placeholder={field.placeholder} value={formFields[field.key] || ""} onChange={e => setFormFields(p => ({ ...p, [field.key]: e.target.value }))} />
+                  <textarea
+                    placeholder={field.placeholder}
+                    value={formFields[field.key] || ""}
+                    onChange={e => setFormFields(p => ({ ...p, [field.key]: e.target.value }))}
+                  />
                 ) : (
-                  <input type="text" placeholder={field.placeholder} value={formFields[field.key] || ""} onChange={e => setFormFields(p => ({ ...p, [field.key]: e.target.value }))} />
+                  <input
+                    type="text"
+                    placeholder={field.placeholder}
+                    value={formFields[field.key] || ""}
+                    onChange={e => setFormFields(p => ({ ...p, [field.key]: e.target.value }))}
+                  />
                 )}
               </div>
             ))}
-            {error && <div className="error-msg">⚠️ {error}</div>}
-            <button className="generate-btn" onClick={generateDocument} disabled={!allFilled}>
+            {error && <div className="error-msg">{error}</div>}
+            <button
+              className="generate-btn"
+              onClick={generateDocument}
+              disabled={!allFilled}
+            >
               Generate {selectedDoc.name} →
             </button>
           </div>
@@ -357,7 +575,7 @@ export default function DocForge() {
         {step === "generating" && (
           <div className="generating-screen">
             <h2>Drafting your {selectedDoc?.name}...</h2>
-            <p>DocForge is writing your complete document. This takes about 15–30 seconds.</p>
+            <p>DocForge is writing your document. This takes about 15–30 seconds.</p>
             <div className="progress-bar"><div className="progress-fill" /></div>
             <div className="stream-preview">{generatedDoc}</div>
           </div>
@@ -371,14 +589,20 @@ export default function DocForge() {
                 <p>Your document is ready. Review, copy, or download below.</p>
               </div>
               <div className="result-actions">
-                <button className="action-btn" onClick={copyToClipboard}>{copied ? "✓ Copied!" : "📋 Copy"}</button>
-                <button className="action-btn primary" onClick={downloadTxt}>↓ Download .txt</button>
+                <button className="action-btn" onClick={copyToClipboard}>
+                  {copied ? "✓ Copied!" : "📋 Copy"}
+                </button>
+                <button className="action-btn primary" onClick={downloadTxt}>
+                  ↓ Download .txt
+                </button>
               </div>
             </div>
             <div className="doc-output" ref={docRef}>
               <MarkdownRenderer content={generatedDoc} />
             </div>
-            <button className="new-doc-btn" onClick={resetToHome}>+ Generate another document</button>
+            <button className="new-doc-btn" onClick={resetToHome}>
+              + Generate another document
+            </button>
           </div>
         )}
 
